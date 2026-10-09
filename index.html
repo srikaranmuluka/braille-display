@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Tactile Braille Controller</title>
+  <!-- MQTT.js library from CDN -->
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <style>
+    :root {
+      --bg-color: #0f172a;
+      --card-bg: #1e293b;
+      --card-border: #334155;
+      --primary: #38bdf8;
+      --primary-hover: #0284c7;
+      --accent: #818cf8;
+      --danger: #f43f5e;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --dot-inactive: #334155;
+      --dot-active: #38bdf8;
+      --dot-glow: rgba(56, 189, 248, 0.6);
+      --success: #22c55e;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    body {
+      background-color: var(--bg-color);
+      color: var(--text-main);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 16px;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 480px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    /* Header */
+    header {
+      text-align: center;
+      padding: 8px 0;
+    }
+
+    header h1 {
+      font-size: 1.4rem;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      color: var(--text-main);
+    }
+
+    header p {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    /* Connection Card */
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      padding: 16px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+    }
+
+    .status-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      padding: 6px 12px;
+      border-radius: 20px;
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--danger);
+      box-shadow: 0 0 8px var(--danger);
+      transition: all 0.3s ease;
+    }
+
+    .status-dot.connected {
+      background: var(--success);
+      box-shadow: 0 0 10px var(--success);
+    }
+
+    .status-dot.connecting {
+      background: #eab308;
+      box-shadow: 0 0 10px #eab308;
+    }
+
+    .topic-info {
+      margin-top: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .topic-info label {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .topic-input {
+      background: #0f172a;
+      border: 1px solid var(--card-border);
+      color: var(--primary);
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      font-family: monospace;
+      outline: none;
+    }
+
+    .topic-input:focus {
+      border-color: var(--primary);
+    }
+
+    /* Input Card */
+    .input-section {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .input-label {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--text-muted);
+    }
+
+    textarea {
+      width: 100%;
+      height: 95px;
+      background: #0f172a;
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 12px;
+      color: var(--text-main);
+      font-size: 1.05rem;
+      resize: none;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    textarea:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.2);
+    }
+
+    .quick-chips {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 4px;
+    }
+
+    .chip {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--card-border);
+      color: var(--text-muted);
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 0.75rem;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.2s;
+    }
+
+    .chip:active {
+      background: var(--primary);
+      color: #0f172a;
+    }
+
+    /* Action Buttons */
+    .button-group {
+      display: flex;
+      gap: 10px;
+      margin-top: 4px;
+    }
+
+    button {
+      border: none;
+      cursor: pointer;
+      font-weight: 600;
+      border-radius: 12px;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .btn-primary {
+      flex: 2;
+      background: var(--primary);
+      color: #0f172a;
+      padding: 14px;
+      font-size: 1rem;
+      box-shadow: 0 4px 15px rgba(56, 189, 248, 0.3);
+    }
+
+    .btn-primary:active {
+      transform: scale(0.98);
+      background: var(--primary-hover);
+    }
+
+    .btn-primary:disabled {
+      background: #475569;
+      color: #94a3b8;
+      cursor: not-allowed;
+      box-shadow: none;
+    }
+
+    .btn-secondary {
+      flex: 1;
+      background: #334155;
+      color: var(--text-main);
+      padding: 14px;
+      font-size: 0.9rem;
+    }
+
+    .btn-secondary:active {
+      background: #475569;
+      transform: scale(0.98);
+    }
+
+    .btn-danger {
+      width: 100%;
+      background: rgba(244, 63, 94, 0.15);
+      border: 1px solid var(--danger);
+      color: #fda4af;
+      padding: 10px;
+      font-size: 0.85rem;
+      margin-top: 4px;
+    }
+
+    .btn-danger:active {
+      background: rgba(244, 63, 94, 0.3);
+    }
+
+    /* Live Braille Visualizer Card */
+    .visualizer-card {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .viz-header {
+      width: 100%;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .viz-title {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--text-muted);
+    }
+
+    .current-char-badge {
+      font-size: 1.4rem;
+      font-weight: 800;
+      color: var(--primary);
+      min-width: 32px;
+      text-align: center;
+      background: #0f172a;
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 2px 8px;
+    }
+
+    /* 2x3 Braille Matrix Display */
+    .braille-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 45px);
+      grid-template-rows: repeat(3, 45px);
+      gap: 14px 24px;
+      padding: 16px 24px;
+      background: #0f172a;
+      border: 2px solid var(--card-border);
+      border-radius: 20px;
+    }
+
+    .braille-dot {
+      width: 45px;
+      height: 45px;
+      border-radius: 50%;
+      background: var(--dot-inactive);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: #64748b;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+      box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.4);
+    }
+
+    .braille-dot.active {
+      background: var(--dot-active);
+      color: #0f172a;
+      box-shadow: 0 0 16px var(--dot-glow), inset 0 2px 4px rgba(255, 255, 255, 0.5);
+      transform: scale(1.08);
+    }
+
+    .timing-bar-container {
+      width: 100%;
+      height: 4px;
+      background: #334155;
+      border-radius: 2px;
+      overflow: hidden;
+      margin-top: 4px;
+    }
+
+    .timing-bar {
+      height: 100%;
+      width: 0%;
+      background: var(--primary);
+      transition: width 0.1s linear;
+    }
+
+    /* Log Output */
+    .log-box {
+      background: #090d16;
+      border: 1px solid #1e293b;
+      border-radius: 12px;
+      padding: 10px 14px;
+      font-family: monospace;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      max-height: 110px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column-reverse;
+      gap: 4px;
+    }
+
+    .log-entry {
+      word-break: break-all;
+    }
+    .log-entry.success { color: var(--success); }
+    .log-entry.info { color: var(--primary); }
+    .log-entry.warn { color: #f59e0b; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header>
+      <h1>Tactile Braille Controller</h1>
+      <p>Single-Cell Servo Tactile Display (ESP32 + MQTT)</p>
+    </header>
+
+    <!-- Connection & Topic Settings -->
+    <div class="card">
+      <div class="status-row">
+        <span style="font-size: 0.85rem; color: var(--text-muted);">MQTT Broker Status</span>
+        <div class="status-badge">
+          <div id="statusDot" class="status-dot connecting"></div>
+          <span id="statusText">Connecting...</span>
+        </div>
+      </div>
+      <div class="topic-info">
+        <label for="topicInput">MQTT Topic (ESP32 Subscribes Here)</label>
+        <input id="topicInput" class="topic-input" type="text" value="braille/display/input" />
+      </div>
+    </div>
+
+    <!-- Text Input Card -->
+    <div class="card input-section">
+      <div class="input-label">Enter Text to Display:</div>
+      <textarea id="messageInput" placeholder="Type text here... (e.g., iam iron man)" maxlength="200">iam iron man</textarea>
+
+      <!-- Quick Preset Chips -->
+      <div class="quick-chips">
+        <div class="chip" onclick="setPreset('iam iron man')">"iam iron man"</div>
+        <div class="chip" onclick="setPreset('hello world')">"hello world"</div>
+        <div class="chip" onclick="setPreset('braille')">"braille"</div>
+        <div class="chip" onclick="setPreset('vit')">"vit"</div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="button-group">
+        <button id="sendBtn" class="btn-primary" onclick="sendMessage()">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="22" y1="2" x2="11" y2="13"></line>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+          </svg>
+          Send to ESP32
+        </button>
+        <button class="btn-secondary" onclick="clearInput()">Clear</button>
+      </div>
+
+      <button class="btn-danger" onclick="sendReset()">
+        ⚠️ Emergency Reset / Flat All Dots
+      </button>
+    </div>
+
+    <!-- Live Tactile Visualizer (Simulates the 6 Servos) -->
+    <div class="card visualizer-card">
+      <div class="viz-header">
+        <span class="viz-title">Live 2×3 Braille Cell Preview:</span>
+        <div id="charBadge" class="current-char-badge">-</div>
+      </div>
+
+      <!-- Braille 2x3 Matrix -->
+      <!-- Dot 1 (TL), Dot 4 (TR) -->
+      <!-- Dot 2 (ML), Dot 5 (MR) -->
+      <!-- Dot 3 (BL), Dot 6 (BR) -->
+      <div class="braille-grid">
+        <div id="dot1" class="braille-dot">1</div>
+        <div id="dot4" class="braille-dot">4</div>
+        <div id="dot2" class="braille-dot">2</div>
+        <div id="dot5" class="braille-dot">5</div>
+        <div id="dot3" class="braille-dot">3</div>
+        <div id="dot6" class="braille-dot">6</div>
+      </div>
+
+      <div class="timing-bar-container">
+        <div id="timingBar" class="timing-bar"></div>
+      </div>
+      <span id="timingStatus" style="font-size: 0.75rem; color: var(--text-muted);">Idle</span>
+    </div>
+
+    <!-- Communication Log -->
+    <div class="card">
+      <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 6px; font-weight: 600;">ACTIVITY LOG</div>
+      <div id="logBox" class="log-box"></div>
+    </div>
+  </div>
+
+  <script>
+    // Standard Braille Grade 1 Alphabet Map (Dots 1 to 6)
+    // 1 = Servo High (Pop-it raised), 0 = Servo Low (Flat)
+    const BRAILLE_MAP = {
+      'a': [1, 0, 0, 0, 0, 0],
+      'b': [1, 1, 0, 0, 0, 0],
+      'c': [1, 0, 0, 1, 0, 0],
+      'd': [1, 0, 0, 1, 1, 0],
+      'e': [1, 0, 0, 0, 1, 0],
+      'f': [1, 1, 0, 1, 0, 0],
+      'g': [1, 1, 0, 1, 1, 0],
+      'h': [1, 1, 0, 0, 1, 0],
+      'i': [0, 1, 0, 1, 0, 0],
+      'j': [0, 1, 0, 1, 1, 0],
+      'k': [1, 0, 1, 0, 0, 0],
+      'l': [1, 1, 1, 0, 0, 0],
+      'm': [1, 0, 1, 1, 0, 0],
+      'n': [1, 0, 1, 1, 1, 0],
+      'o': [1, 0, 1, 0, 1, 0],
+      'p': [1, 1, 1, 1, 0, 0],
+      'q': [1, 1, 1, 1, 1, 0],
+      'r': [1, 1, 1, 0, 1, 0],
+      's': [0, 1, 1, 1, 0, 0],
+      't': [0, 1, 1, 1, 1, 0],
+      'u': [1, 0, 1, 0, 0, 1],
+      'v': [1, 1, 1, 0, 0, 1],
+      'w': [0, 1, 0, 1, 1, 1],
+      'x': [1, 0, 1, 1, 0, 1],
+      'y': [1, 0, 1, 1, 1, 1],
+      'z': [1, 0, 1, 0, 1, 1],
+      ' ': [0, 0, 0, 0, 0, 0] // space = full reset
+    };
+
+    // Public EMQX WSS Broker (Matches Mobile App & ESP32)
+    const BROKER_URL = "wss://broker.emqx.io:8084/mqtt";
+    const CLIENT_ID = "BrailleApp_" + Math.random().toString(16).substring(2, 10);
+
+    let client = null;
+    let isConnected = false;
+    let simTimer = null;
+
+    // UI Elements
+    const statusDot = document.getElementById("statusDot");
+    const statusText = document.getElementById("statusText");
+    const topicInput = document.getElementById("topicInput");
+    const messageInput = document.getElementById("messageInput");
+    const sendBtn = document.getElementById("sendBtn");
+    const logBox = document.getElementById("logBox");
+    const charBadge = document.getElementById("charBadge");
+    const timingBar = document.getElementById("timingBar");
+    const timingStatus = document.getElementById("timingStatus");
+
+    function log(msg, type = "normal") {
+      const entry = document.createElement("div");
+      entry.className = "log-entry " + type;
+      const time = new Date().toLocaleTimeString();
+      entry.innerText = `[${time}] ${msg}`;
+      logBox.prepend(entry);
+    }
+
+    // Connect to MQTT Broker
+    function connectMQTT() {
+      statusDot.className = "status-dot connecting";
+      statusText.innerText = "Connecting...";
+      log("Connecting to HiveMQ Broker...", "info");
+
+      client = mqtt.connect(BROKER_URL, {
+        clientId: CLIENT_ID,
+        clean: true,
+        connectTimeout: 5000,
+        reconnectPeriod: 3000
+      });
+
+      client.on("connect", () => {
+        isConnected = true;
+        statusDot.className = "status-dot connected";
+        statusText.innerText = "Connected";
+        sendBtn.disabled = false;
+        log("Connected to MQTT Broker!", "success");
+      });
+
+      client.on("error", (err) => {
+        log("MQTT Error: " + err.message, "warn");
+      });
+
+      client.on("offline", () => {
+        isConnected = false;
+        statusDot.className = "status-dot";
+        statusText.innerText = "Disconnected";
+        sendBtn.disabled = true;
+        log("MQTT Disconnected. Reconnecting...", "warn");
+      });
+    }
+
+    // Send Message
+    function sendMessage() {
+      const text = messageInput.value.trim();
+      const topic = topicInput.value.trim();
+
+      if (!text) {
+        alert("Please enter some text!");
+        return;
+      }
+      if (!topic) {
+        alert("Please enter a valid MQTT topic!");
+        return;
+      }
+
+      if (!isConnected || !client) {
+        alert("MQTT is not connected yet. Please wait...");
+        return;
+      }
+
+      // Publish string to ESP32
+      client.publish(topic, text, { qos: 0 }, (err) => {
+        if (!err) {
+          log(`Published: "${text}" to topic [${topic}]`, "success");
+          // Start the local visual simulation synchronized with the 500ms ESP32 logic!
+          startSimulation(text);
+        } else {
+          log("Publish failed: " + err.message, "warn");
+        }
+      });
+    }
+
+    // Emergency Reset
+    function sendReset() {
+      const topic = topicInput.value.trim();
+      if (isConnected && client) {
+        client.publish(topic, "__RESET__", { qos: 0 });
+        log("Sent emergency RESET command to ESP32", "warn");
+      }
+      stopSimulation();
+      renderDots([0, 0, 0, 0, 0, 0]);
+      charBadge.innerText = "-";
+      timingStatus.innerText = "Reset complete (All Servos 0)";
+    }
+
+    function clearInput() {
+      messageInput.value = "";
+      messageInput.focus();
+    }
+
+    function setPreset(txt) {
+      messageInput.value = txt;
+    }
+
+    // Render 6 dots in 2x3 matrix
+    function renderDots(dots) {
+      for (let i = 1; i <= 6; i++) {
+        const dotElem = document.getElementById("dot" + i);
+        if (dots[i - 1] === 1) {
+          dotElem.classList.add("active");
+        } else {
+          dotElem.classList.remove("active");
+        }
+      }
+    }
+
+    // Local visual simulation of 500ms active -> 500ms reset
+    function startSimulation(text) {
+      stopSimulation();
+      const chars = text.toLowerCase().split("");
+      let stepIndex = 0; // step 0 = char on, step 1 = reset, step 2 = next char on...
+
+      timingStatus.innerText = "Displaying sequence on Braille Cell...";
+
+      function tick() {
+        const charIdx = Math.floor(stepIndex / 2);
+        const isResetPhase = stepIndex % 2 === 1;
+
+        if (charIdx >= chars.length) {
+          // Finished
+          stopSimulation();
+          renderDots([0, 0, 0, 0, 0, 0]);
+          charBadge.innerText = "✓";
+          timingStatus.innerText = "Sequence Complete!";
+          return;
+        }
+
+        const currentChar = chars[charIdx];
+
+        if (!isResetPhase) {
+          // Active character (500 ms)
+          const pattern = BRAILLE_MAP[currentChar] || [0, 0, 0, 0, 0, 0];
+          charBadge.innerText = currentChar === " " ? "␣" : currentChar.toUpperCase();
+          renderDots(pattern);
+          timingStatus.innerText = `Letter "${currentChar.toUpperCase()}" (500ms Active)`;
+          animateBar(500);
+        } else {
+          // Reset / pause phase (500 ms)
+          renderDots([0, 0, 0, 0, 0, 0]);
+          charBadge.innerText = "—";
+          timingStatus.innerText = `Inter-letter Reset (500ms All 0)`;
+          animateBar(500);
+        }
+
+        stepIndex++;
+        simTimer = setTimeout(tick, 500);
+      }
+
+      tick();
+    }
+
+    function stopSimulation() {
+      if (simTimer) clearTimeout(simTimer);
+      simTimer = null;
+      timingBar.style.width = "0%";
+    }
+
+    function animateBar(duration) {
+      timingBar.style.transition = "none";
+      timingBar.style.width = "0%";
+      setTimeout(() => {
+        timingBar.style.transition = `width ${duration}ms linear`;
+        timingBar.style.width = "100%";
+      }, 20);
+    }
+
+    // Start MQTT on page load
+    window.addEventListener("DOMContentLoaded", () => {
+      connectMQTT();
+    });
+  </script>
+</body>
+</html>
